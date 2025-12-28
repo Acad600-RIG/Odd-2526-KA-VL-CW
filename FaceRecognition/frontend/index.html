@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Face Recognition Demo</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #111827;
+      --accent: #22d3ee;
+      --text: #e5e7eb;
+      --muted: #9ca3af;
+      --danger: #f87171;
+      --success: #34d399;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+      background: radial-gradient(circle at 20% 20%, rgba(34,211,238,0.1), transparent 25%),
+                  radial-gradient(circle at 80% 0%, rgba(52,211,153,0.12), transparent 25%),
+                  var(--bg);
+      color: var(--text);
+      display: flex;
+      justify-content: center;
+      padding: 24px;
+    }
+    .layout {
+      width: min(1100px, 100%);
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      gap: 16px;
+    }
+    .card {
+      background: var(--card);
+      border: 1px solid rgba(255,255,255,0.06);
+      border-radius: 12px;
+      padding: 18px;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.35);
+    }
+    h1 { margin-top: 0; font-size: 26px; }
+    h2 { margin: 0 0 12px 0; font-size: 18px; }
+    label { display: block; margin-bottom: 6px; color: var(--muted); }
+    input[type="text"], input[type="file"] {
+      width: 100%;
+      padding: 10px 12px;
+      border-radius: 8px;
+      border: 1px solid rgba(255,255,255,0.12);
+      background: rgba(255,255,255,0.04);
+      color: var(--text);
+      margin-bottom: 12px;
+    }
+    button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      background: linear-gradient(120deg, var(--accent), #3b82f6);
+      color: #0b1021;
+      border: none;
+      border-radius: 10px;
+      padding: 10px 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: transform 0.12s ease, box-shadow 0.12s ease;
+    }
+    button:hover { transform: translateY(-1px); box-shadow: 0 10px 30px rgba(34,211,238,0.25); }
+    button:active { transform: translateY(0); }
+    .status {
+      margin-top: 12px;
+      padding: 10px 12px;
+      border-radius: 10px;
+      background: rgba(255,255,255,0.04);
+      min-height: 48px;
+      border: 1px solid rgba(255,255,255,0.06);
+      white-space: pre-wrap;
+      font-size: 14px;
+    }
+    .status.ok { border-color: rgba(52,211,153,0.35); color: var(--success); }
+    .status.err { border-color: rgba(248,113,113,0.35); color: var(--danger); }
+    .status.loading { color: var(--muted); }
+    .stack { display: flex; flex-direction: column; gap: 10px; }
+    .note { color: var(--muted); font-size: 13px; margin-top: 8px; }
+    video {
+      width: 100%;
+      border-radius: 10px;
+      border: 1px solid rgba(255,255,255,0.08);
+      background: #000;
+    }
+    .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+    .spinner {
+      display: inline-block;
+      width: 16px;
+      height: 16px;
+      border: 2px solid rgba(255,255,255,0.35);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      vertical-align: middle;
+      margin-right: 8px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <div class="card">
+      <h1>Face Recognition Demo</h1>
+      <p class="note">Backend must be running at http://localhost:8000. Camera permission is required. Initial format: AA00-1 or AA00-2 (e.g., KA24-1).</p>
+      <video id="preview" autoplay playsinline muted></video>
+      <p class="note">Real-time capture: we send the current frame when you click Register or Verify.</p>
+    </div>
+
+    <div class="card">
+      <h2>Register Face</h2>
+      <div class="stack">
+        <div>
+          <label for="reg-initial">Initial</label>
+          <input id="reg-initial" type="text" placeholder="KA24-1" maxlength="7" />
+        </div>
+        <div class="actions">
+          <button id="reg-btn">Capture & Register</button>
+        </div>
+        <div id="reg-status" class="status"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Verify Face</h2>
+      <div class="stack">
+        <div class="actions">
+          <button id="ver-btn">Capture & Verify</button>
+        </div>
+        <div id="ver-status" class="status"></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const apiBase = "http://localhost:8000";
+    const initialRegex = /^[A-Z]{2}\d{2}-[1-2]$/;
+    const video = document.getElementById("preview");
+
+    const regBtn = document.getElementById("reg-btn");
+    const regInitial = document.getElementById("reg-initial");
+    const regStatus = document.getElementById("reg-status");
+
+    const verBtn = document.getElementById("ver-btn");
+    const verStatus = document.getElementById("ver-status");
+
+    async function startCamera() {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" }, audio: false });
+        video.srcObject = stream;
+      } catch (err) {
+        alert("Camera access is required: " + (err.message || err));
+      }
+    }
+
+    function captureFrame() {
+      return new Promise((resolve, reject) => {
+        const track = video?.srcObject?.getVideoTracks?.()[0];
+        if (!video || !track) {
+          reject(new Error("Camera not available."));
+          return;
+        }
+        const canvas = document.createElement("canvas");
+        canvas.width = video.videoWidth || 640;
+        canvas.height = video.videoHeight || 480;
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        canvas.toBlob((blob) => {
+          if (!blob) {
+            reject(new Error("Failed to capture frame."));
+          } else {
+            resolve(blob);
+          }
+        }, "image/jpeg", 0.9);
+      });
+    }
+
+    function setStatus(el, msg, ok = false, loading = false) {
+      el.textContent = msg;
+      el.classList.remove("ok", "err", "loading");
+      if (loading) el.classList.add("loading");
+      else if (msg) el.classList.add(ok ? "ok" : "err");
+    }
+
+    function setLoading(btn, statusEl, text) {
+      btn.disabled = true;
+      setStatus(statusEl, text, false, true);
+      if (!btn.dataset.originalLabel) {
+        btn.dataset.originalLabel = btn.textContent;
+      }
+      btn.innerHTML = `<span class="spinner"></span>${text}`;
+    }
+
+    function clearLoading(btn, statusEl, ok, text) {
+      btn.disabled = false;
+      btn.textContent = btn.dataset.originalLabel || btn.textContent;
+      setStatus(statusEl, text, ok, false);
+    }
+
+    regBtn.onclick = async () => {
+      const initial = regInitial.value.trim().toUpperCase();
+      if (!initialRegex.test(initial)) {
+        setStatus(regStatus, "Initial must match AA00-1 or AA00-2.");
+        return;
+      }
+      let blob;
+      try {
+        setLoading(regBtn, regStatus, "Capturing frame...");
+        blob = await captureFrame();
+      } catch (err) {
+        clearLoading(regBtn, regStatus, false, err.message || "Camera error.");
+        return;
+      }
+
+      const fd = new FormData();
+      fd.append("initial", initial);
+      fd.append("file", blob, "frame.jpg");
+      setLoading(regBtn, regStatus, "Submitting...");
+      try {
+        const res = await fetch(`${apiBase}/register-face`, { method: "POST", body: fd });
+        const data = await res.json();
+        if (res.ok && data.status === "success") {
+          clearLoading(regBtn, regStatus, true, `Registered ${initial}.`);
+        } else {
+          clearLoading(regBtn, regStatus, false, data.detail || data.message || "Registration failed.");
+        }
+      } catch (err) {
+        clearLoading(regBtn, regStatus, false, err.message || "Network error.");
+      }
+    };
+
+    verBtn.onclick = async () => {
+      let blob;
+      try {
+        setLoading(verBtn, verStatus, "Capturing frame...");
+        blob = await captureFrame();
+      } catch (err) {
+        clearLoading(verBtn, verStatus, false, err.message || "Camera error.");
+        return;
+      }
+
+      const fd = new FormData();
+      fd.append("file", blob, "frame.jpg");
+      setLoading(verBtn, verStatus, "Submitting...");
+      try {
+        const res = await fetch(`${apiBase}/verify-face`, { method: "POST", body: fd });
+        const data = await res.json();
+        if (res.ok && data.status === "success") {
+          const initial = data.initial || "?";
+          const sim = data.similarity ? data.similarity.toFixed(4) : "";
+          clearLoading(verBtn, verStatus, true, `Match: ${initial} (similarity ${sim}).`);
+        } else {
+          clearLoading(verBtn, verStatus, false, data.detail || data.message || "Verification failed.");
+        }
+      } catch (err) {
+        clearLoading(verBtn, verStatus, false, err.message || "Network error.");
+      }
+    };
+
+    startCamera();
+  </script>
+</body>
+</html>

@@ -1,0 +1,47 @@
+# Byte-compiled / cache
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.cache/
+
+# Virtual environments
+.env
+.env*/
+.venv/
+venv/
+env/
+pythonenv*
+Pipfile.lock
+poetry.lock
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+
+# Logs
+*.log
+
+# IDE / editor
+.vscode/
+.idea/
+*.code-workspace
+
+# OS artifacts
+Thumbs.db
+.DS_Store
+
+# Notebooks
+.ipynb_checkpoints/
+
+# Node / frontend
+node_modules/
+
+# Arduino / firmware
+.pio/
+*.bin
+*.elf
+*.map
+*.hex
