@@ -22,6 +22,7 @@
 #include "esp_http_client.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include <errno.h>
 
 #if defined(ARDUINO_ARCH_ESP32) && defined(CONFIG_ARDUHAL_ESP_LOG)
 #include "esp32-hal-log.h"
@@ -367,7 +368,7 @@ static esp_err_t post_verify(camera_fb_t *fb)
 
     esp_http_client_config_t cfg = {
         .url = url,
-        .timeout_ms = 7000
+        .timeout_ms = 25000
     };
 
     esp_http_client_handle_t client = esp_http_client_init(&cfg);
@@ -393,12 +394,17 @@ static esp_err_t post_verify(camera_fb_t *fb)
     esp_http_client_set_header(client, "Content-Type", content_type);
     esp_http_client_set_method(client, HTTP_METHOD_POST);
 
+    log_i("post_verify: open %s len=%d", url, content_len);
+
     if (esp_http_client_open(client, content_len) != ESP_OK)
     {
-        log_e("http open failed");
+        int eno = esp_http_client_get_errno(client);
+        log_e("http open failed errno=%d (%s)", eno, strerror(eno));
         esp_http_client_cleanup(client);
         return ESP_FAIL;
     }
+
+    log_i("post_verify: open ok");
 
     esp_http_client_write(client, head, head_len);
     esp_http_client_write(client, (const char *)fb->buf, fb->len);
@@ -407,12 +413,23 @@ static esp_err_t post_verify(camera_fb_t *fb)
     int status = esp_http_client_get_status_code(client);
     char resp[256] = {0};
     int len = esp_http_client_fetch_headers(client);
+    if (len < 0)
+    {
+        int eno = esp_http_client_get_errno(client);
+        log_w("fetch_headers err len=%d errno=%d (%s)", len, eno, strerror(eno));
+    }
     if (len > 0 && len < (int)sizeof(resp))
     {
         esp_http_client_read_response(client, resp, sizeof(resp) - 1);
     }
 
     esp_http_client_cleanup(client);
+
+    if (status == 0)
+    {
+        int eno = esp_http_client_get_errno(client);
+        log_w("AI verify failed: status=0 errno=%d (%s)", eno, strerror(eno));
+    }
 
     if (status == 200 && strstr(resp, "\"status\":\"success\""))
     {
@@ -475,9 +492,11 @@ static bool has_face(camera_fb_t *fb)
         free(out_buf);
     }
 
+    log_i("has_face: %s (fmt=%d size=%dx%d)", detected ? "true" : "false", fb->format, fb->width, fb->height);
     return detected;
 #else
     // If face detection is not compiled in, always send
+    log_i("has_face: skip (face detect disabled)");
     return true;
 #endif
 }

@@ -8,6 +8,7 @@ from deepface import DeepFace
 import numpy as np
 import cv2
 import uvicorn
+import requests
 from typing import Dict
 import json
 import numpy as np
@@ -36,6 +37,22 @@ app.add_middleware(
 )
 
 INITIAL_PATTERN = re.compile(r"^[A-Z]{2}\d{2}-[1-2]$")
+GO_API_BASE = os.environ.get("GO_API_BASE", "http://localhost:8080")
+
+
+def get_next_room(username: str):
+    try:
+        resp = requests.get(f"{GO_API_BASE}/jobs/next", params={"username": username}, timeout=10)
+        if resp.status_code == 404:
+            # No upcoming shift for today
+            return None, None, "No upcoming teaching shift found"
+
+        resp.raise_for_status()
+        data = resp.json()
+        return data.get("room"), data, None
+    except Exception as e:
+        print(f"Error fetching next room for {username}: {e}")
+        return None, None, str(e)
 
 
 def normalize_and_validate_initial(value: str) -> str:
@@ -139,7 +156,7 @@ async def verify_face(
         
         best_match = None
         highest_similarity = 0
-        threshold = 0.7
+        threshold = 0.3
         
         for initial, stored_embedding in face_embeddings.items():
             # stored_embedding is already a list due to load_embeddings cleaning
@@ -152,12 +169,25 @@ async def verify_face(
                 best_match = initial
         
         if highest_similarity >= threshold:
-            return {
-                "status": "success", 
-                "message": "Face verified successfully", 
+            room, job_payload, room_err = get_next_room(best_match)
+
+            response = {
+                "status": "success",
+                "message": "Face verified successfully",
                 "initial": best_match,
-                "similarity": float(highest_similarity)
+                "similarity": float(highest_similarity),
             }
+
+            if room is not None:
+                response.update({"room": room, "job": job_payload})
+            else:
+                response.update({
+                    "room": None,
+                    "job": job_payload,
+                    "room_message": room_err or "No upcoming teaching shift found",
+                })
+
+            return response
         else:
             return {
                 "status": "failed", 
